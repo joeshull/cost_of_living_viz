@@ -19,6 +19,7 @@ class COLDataLoader():
         self.df_zil_own = None
         self.df_zil_rent = None
         self.df_ce = None
+        self.ce_geocodes = None
         self.df_state_tax = None
         self.do_geocode = do_geocode
         
@@ -31,17 +32,31 @@ class COLDataLoader():
         file_list = self.get_file_list(self.ce_path)
         list_df = self.get_dataframes(file_list)
         self.df_ce = self.merge_dataframes(list_df)
+
         
+
+        #Delete Summary Columns
+        ce_cols = [False if 'All' in item else True for item in self.df_ce.columns.values]
+        self.df_ce = self.df_ce.loc[:, ce_cols ]
+
+        ## Get CE geocodes
+        try:
+            self.ce_geocodes = np.load(os.path.join(base_ce_path, '../','ce_geocodes.npy'))
+
+        except:
+            self.ce_geocodes = self.gc.geocode_ce(self.df_ce)
+
         #Load State Tax
         self.get_state_tax()
 
         #Do geocode
         if self.do_geocode:
             self.gc= COLGeoUtil()
-            with requests.Session() as session:
+            with requests.Session() as session1, requests.Session() as session2:
                 self.df_zil_own = self.gc.geocode_dataframe(self.df_zil_own, 'RegionName', 'State', session)
                 self.df_zil_rent = self.gc.geocode_dataframe(self.df_zil_rent, 'RegionName', 'State', session)
 
+            
             
 
         

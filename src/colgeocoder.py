@@ -8,17 +8,23 @@ class COLGeoUtil():
     def __init__(self, API_KEY = os.environ['GMAP_API_KEY']):
         self.API_KEY = API_KEY
         
-    def geocode_one(self, city_state, session1, session2):
+    def geocode_one(self, city_state, session1=None, session2=None):
         #Inputs:
         #city_state (array-like): contains str(city) and str(state abbreviation)
         #session (requests.Session()): an instantiated session from the requests,  modeule.
-        x = city_state[0] + ', ' + city_state[1]
+        if isinstance(city_state, (list, tuple, np.ndarray)):
+            x = city_state[0] + ', ' + city_state[1]
+        else: 
+            x = city_state
+            
+        if session1 is None:
+            session1 = session2 = requests
         
         print("getting place id for", x)
         #Fetch ID from Places API
         try:
             places_url = 'https://maps.googleapis.com/maps/api/place/autocomplete/json'
-            places_params = { 'input': x, 'key': self.API_KEY, 'types': 'geocode'}
+            places_params = { 'input': x, 'key': self.API_KEY, 'types': '(cities)'}
             r = session1.get(places_url, params=places_params)
             results = r.json()
             place_id = results['predictions'][0]['place_id']
@@ -51,6 +57,25 @@ class COLGeoUtil():
             df.insert(1,lat_lng_col, 0)
         df[lat_lng_col] = df.loc[:,[city_col, state_col]].apply(self.geocode_one, axis=1, args=(session1,session2,))
         return df
+    
+    def copy_zil_geocode(self,df_left, df_right, key_cols=['RegionName', 'State'], lat_lng_col='lat_lng'):
+        #Prepare to merge only lat,lng
+        merge_cols = key_cols
+        merge_cols.append(lat_lng_col)
+        new_df =  pd.merge(df_left, df_right.loc[:,merge_cols], how='left', on=key_cols)
+        #Move lat.lng col to index 3
+        feature_cols = list(new_df.columns.values)
+        feature_cols.pop(-1)
+        feature_cols.insert(lat_lng_col,3)
+        
+        return new_df.loc[:, feature_cols]
+    
+    def geocode_ce(self, df):
+        cities = df.columns.values
+        geocodes = [self.geocode_one(x) for x in cities]
+#         df.loc['lat_lng'] = geocodes
+        return geocodes
+        
         
 
 if __name__ == '__main__':
