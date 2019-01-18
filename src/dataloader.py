@@ -13,6 +13,7 @@ class COLDataLoader():
     #Instantiate with the path to the Zillow city csvs and Consumer Expenditure xlsx
     
     def __init__(self, zillow_path, ce_path, state_tax_path, do_geocode=False):
+        self.gc= COLGeoUtil()
         self.zillow_path = zillow_path
         self.ce_path = ce_path
         self.state_tax_path = state_tax_path
@@ -25,8 +26,8 @@ class COLDataLoader():
         
     def load(self):
         #Load Zillow
-        self.df_zil_own = pd.read_csv(os.path.join(self.zillow_path, 'City_MedianValuePerSqft_AllHomes.csv'), header=0)
-        self.df_zil_rent = pd.read_csv(os.path.join(self.zillow_path,'City_MedianRentalPricePerSqft_AllHomes.csv'))
+        self.df_zil_own = pd.read_csv(os.path.join(self.zillow_path, 'df_zil_own_geocoded.csv'), header=0)
+        self.df_zil_rent = pd.read_csv(os.path.join(self.zillow_path,'df_zil_rent_geocoded.csv'))
         
         #Load CE
         file_list = self.get_file_list(self.ce_path)
@@ -41,7 +42,8 @@ class COLDataLoader():
 
         ## Get CE geocodes
         try:
-            self.ce_geocodes = np.load(os.path.join(base_ce_path, '../','ce_geocodes.npy'))
+            head, tail = os.path.split(self.ce_path)
+            self.ce_geocodes = np.load(os.path.join(head,'ce_geocodes.npy'))
 
         except:
             self.ce_geocodes = self.gc.geocode_ce(self.df_ce)
@@ -51,7 +53,7 @@ class COLDataLoader():
 
         #Do geocode
         if self.do_geocode:
-            self.gc= COLGeoUtil()
+            
             with requests.Session() as session1, requests.Session() as session2:
                 self.df_zil_own = self.gc.geocode_dataframe(self.df_zil_own, 'RegionName', 'State', session)
                 self.df_zil_rent = self.gc.geocode_dataframe(self.df_zil_rent, 'RegionName', 'State', session)
