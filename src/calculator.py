@@ -5,25 +5,32 @@ from dataloader import COLDataLoader
 class COLCalculator():
     #Cost of Living Calculator
     #Instantiate with the path to the Zillow city csvs and Consumer Expenditure xlsxs
-    def __init__(self, zillow_path, ce_path):
-        self.data = COLDataLoader(zillow_path, ce_path)
-        data.load()
+    def __init__(self, zillow_path, ce_path, state_tax_path):
+        self.data = COLDataLoader(zillow_path, ce_path, state_tax_path)
+        self.data.load()
+        self.gc = COLGeoUtil()
         
-    def calculate(self, gross_income, city, state, married=False):
+    def calculate(self, gross_income, city, state, married=False, mrtg_int=0.0459):
         #Calculation function: returns a dict (or json) with the following values
-        #income_taxes (Tuple): (Float: Approx amount of taxes paid, Float: Approx. Effective Tax Rate)
-        #housing_rent (Tuple): (Int: sqft affordable at the housing % ratio, Float: Ratio of housing/income)
-        #housing_own (Tuple): (Int: sqft affordable at the housing % ratio, Float: Ratio of housing/income)
+        #income_taxes (Tuple): (Float: Approx amount of taxes paid, Float: Approx. Effective Tax Rate, Float: Net Income)
+        #ratios (dict) : Spending items with 1. Float: Annual dollars spent according to CE, 2. Float: Ratio of gross income spent on category
+        #according to CE
+        #housing_rent (Tuple): (Int: sqft affordable at the housing % ratio, Int: Max # people in house)
+        #housing_own (Tuple): (Int: sqft affordable at the housing % ratio, Int: Max # people in house
+        geocode = self.gc.geocode_one([city,state])
         tax_amount, tax_rate, net_income = self._get_taxes(gross_income, city, state, married)
-        housing_rent, housing_own = self._get_housing(gross_income, city, state)
+        ratio_dict = self._get_ratios(gross_income, geocode)
+        housing_own, housing_rent = self._get_housing(gross_income, ratio_dict, geocode, mrtg_int)
+
+        return {'taxes': tuple((tax_amount, tax_rate, net_income)), 'geocode' : geocode,
+               'ratios': ratio_dict, 'housing_own' : housing_own, 'housing_rent' : housing_rent }
     
     # Tax Calculation  - Federal and State
     def _get_taxes(self, gross_income, city, state, married):
         #returns tax amount, tax %, and net income
         fed_tax, fed_rate = self._calc_fed_tax(gross_income, married)
         state_tax, state_rate = self._calc_state_tax(gross_income, state, married)
-
-        total_tax = fed_tax + fed_rate
+        total_tax = fed_tax + state_tax
         net_income = gross_income - total_tax
         effective_tax = total_tax/gross_income
 
@@ -33,6 +40,7 @@ class COLCalculator():
     
     def _calc_fed_tax(self, gross_income, married):
         #tax withholding from https://www.irs.gov/pub/irs-pdf/n1036.pdf
+        #Returns Tax Amount and rate used to calculate withholding
         single_rate = np.array([[3800, 0, .1],
                                 [13500, 970,  .12],
                                 [43275, 4543,  .22],
@@ -64,35 +72,86 @@ class COLCalculator():
 
         mask = np.logical_and(rate[:,0]<=gross_income, rate[:,-1]>gross_income)
 
+        mask = np.logical_and(rate[:,0]<=gross_income, rate[:,-1]>gross_income)
         if mask.any():
             threshold, base_tax, rate = rate[mask][0][0], rate[mask][0][1], rate[mask][0][2]
             return ((base_tax + (gross_income-threshold)*rate), rate)
         else:
-            return 0
+            return (0, 0)
+
         
-    def _calc_state_tax(self, gross_income, state, married):
-        #Tax rates from https://github.com/TaxFoundation/facts-and-figures
-
-
-        pass 
+    def _calc_state_tax(self,gross_income, state, married):
+        #Returns State Tax Amount and Rate used to calculate the amount
+        income = gross_income - 12000
+        if married:
+            income = gross_income - 24000
+        tax_rates = self.data.df_state_tax.loc[self.data.df_state_tax.stateAbbr == state]
+        mask = np.logical_and(tax_rates.iloc[:,-2].values<gross_income, tax_rates.iloc[:,-1].values>=gross_income)
+        rate = tax_rates.loc[mask,'incomeTaxRate'].values[0]
+        return (income*rate, rate)
     
-    def _get_housing(self, gross_income, city):
+    def _get_ratios(self, gross_income, geocode):
+        #get closest city
+        ce_idx = self.gc.get_closest_index(self.data.ce_geocodes, geocode)
+        df = self.data.df_ce.iloc[:,ce_idx]
+        df.dropna(axis=0)
+        
+        #Make % ratio of gross income spent on living items
+        ratios = df / df['Income before taxes']
+        
+        #Hard-code list of spending items (in order of importance) that should total 
+        items_expenditure = ['Housing', 'Food', 'Transportation', 'Healthcare',
+                             'Apparel and services', 'Entertainment', 'Personal care products and services',
+                             'Reading', 'Education', 'Tobacco products and smoking supplies', 'Miscellaneous',
+                             'Cash contributions', 'Personal insurance and pensions']
+        quality_of_life = ['Apparel and services', 'Entertainment', 'Personal care products and services',
+                             'Reading', 'Education', 'Tobacco products and smoking supplies', 'Miscellaneous',
+                             'Cash contributions', 'Personal insurance and pensions']
+        
+        out_dict = {}
+        for key in items_expenditure:
+            ratio = ratios[key]
+            value = ratio*gross_income
+            out_dict[key] = tuple((value, ratio))
+        return out_dict
+    
+    def _get_housing(self, gross_income, ratio_dict, geocode, mrtg_int):
         #Returns two tuples
-        #housing_rent (Tuple): (Int: sqft affordable at the housing % ratio, Float: Ratio of housing/income)
-        #housing_own (Tuple): (Int: sqft affordable at the housing % ratio, Float: Ratio of housing/income)
-        pass
-    
-    def _get_transporation(self, gross_income, city):
-        #Returns amount of transportation ?
-        pass
-    
-    def _get_lifestyle(self, gross_income, city):
-        pass
-    
-    def _get_savings(self, gross_income, city):
-        pass
+        #housing_own (Tuple): (Int: sqft affordable at the housing % ratio, Float: $/sqft, max # people)
+        #Mortgage Calculator makes an unrealistic assumption for simplicity: No down payment. 
+        #housing_rent (Tuple): (Int: sqft affordable at the housing % ratio, Float: $/sqft, max # people)
+        
+        #Get idx of closest city 
+        city_own_idx = self.gc.get_closest_index(self.data.df_zil_own.lat_lng.values, geocode)
+        city_rent_idx = self.gc.get_closest_index(self.data.df_zil_rent.lat_lng.values, geocode)
+        
+        #Get costs for closest city
+        own_cost_per_sqft = self.data.df_zil_own.iloc[city_own_idx, -1]
+        rent_cost_per_sqft = self.data.df_zil_rent.iloc[city_rent_idx, -1]
+        
+        #Calc Mortgage and housing size
+        own_budget = self._calc_mrtg(ratio_dict['Housing'][0], mrtg_int)
+        own_sqft = own_budget/own_cost_per_sqft
+        housing_own = tuple((int(own_sqft), own_sqft//300))
+        
+        #Calc rent sqft
+        rent_budget = ratio_dict['Housing'][0]/12
+        rent_sqft = rent_budget/rent_cost_per_sqft
+        housing_rent = tuple((int(rent_sqft), rent_sqft//300))
+        return housing_own, housing_rent
+        
+    def _calc_mrtg(self, annual_housing_budget, mrtg_int):
+        pmt = annual_housing_budget/12
+        return np.pv(mrtg_int/12, 360, -pmt)
+        
         
 
 if __name__ == '__main__':
-    calculator = COLCalculator(base_zil_path, base_ce_path):
-    print(calculator.calculate(100000, 'San Francisco', 'CA'))
+    base_ce_path = '../data/bls_ce/msa'
+    base_zil_path = '../data/zillow/city'
+    base_tax_path = '../data/state_tax'
+
+    calculator = COLCalculator(base_zil_path,base_ce_path,base_tax_path)
+
+    calculator.calculate(100000, 'San Francisco', 'CA')
+

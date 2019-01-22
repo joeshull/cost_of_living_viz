@@ -36,18 +36,18 @@ class COLGeoUtil():
             g = session2.get(gc_url, params=gc_params)
             point = g.json()['results'][0]['geometry']['location']
             lat, lng = point['lat'], point['lng']
-            return np.array([lat, lng])
+            return np.array([lat, lng]).astype('float32')
         except:
-            return np.array([0, 0])
+            return np.array([0, 0]).astype('float32')
     
     def get_closest_index(self, lat_lng_series, ref_lat_lng):
         #returns index of closest value in lat_lng_series
         #Inputs:
-        #lat_lng_series (pandas series): contains numpy arrays of lat,long points
+        #lat_lng_series (np.array): contains  lat,long points
         #ref_lat_lng (array): contains lat,long of reference city
         
-        dist = np.linalg.norm(np.vstack(lat_lng_series.values) - ref_lat_lng, axis=1)
-        return np.argmax(dist)
+        dist = np.linalg.norm(np.vstack(lat_lng_series).astype('float32') - ref_lat_lng, axis=1)
+        return np.argmin(dist)
     
     def geocode_dataframe(self, df, city_col, state_col, session1, session2, lat_lng_col='lat_lng'):
         try:

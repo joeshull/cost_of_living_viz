@@ -26,9 +26,13 @@ class COLDataLoader():
         
     def load(self):
         #Load Zillow
-        self.df_zil_own = pd.read_csv(os.path.join(self.zillow_path, 'df_zil_own_geocoded.csv'), header=0)
-        self.df_zil_rent = pd.read_csv(os.path.join(self.zillow_path,'df_zil_rent_geocoded.csv'))
+        self.df_zil_own = pd.read_pickle(os.path.join(self.zillow_path, 'df_zil_own_geocoded.pkl'))
+        self.df_zil_rent = pd.read_pickle(os.path.join(self.zillow_path,'df_zil_rent_geocoded.pkl'))
         
+        
+
+
+
         #Load CE
         file_list = self.get_file_list(self.ce_path)
         list_df = self.get_dataframes(file_list)
