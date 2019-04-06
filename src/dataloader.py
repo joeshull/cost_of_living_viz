@@ -116,8 +116,8 @@ class COLDataLoader():
 
 
 if __name__ == '__main__':
-    base_ce_path = '../data/bls_ce/msa/'
-    base_zil_path = '../data/zillow/city/'
-    base_tax_path = '../data/state_tax/'
+    base_ce_path = 'data/bls_ce/msa/'
+    base_zil_path = 'data/zillow/city/'
+    base_tax_path = 'data/state_tax/'
     data = COLDataLoader(base_zil_path, base_ce_path, base_tax_path)
     data.load()

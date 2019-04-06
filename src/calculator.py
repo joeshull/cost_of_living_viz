@@ -1,6 +1,7 @@
 import pandas as pd 
-import numpy as np 
+import numpy as np
 from dataloader import COLDataLoader
+from colgeocoder import COLGeoUtil
 
 class COLCalculator():
     #Cost of Living Calculator
@@ -10,7 +11,7 @@ class COLCalculator():
         self.data.load()
         self.gc = COLGeoUtil()
         
-    def calculate(self, gross_income, city, state, married=False, mrtg_int=0.0459):
+    def calculate(self, gross_income=100000, city="San Francisco", state ="CA", married=False, mrtg_int=0.0459):
         #Calculation function: returns a dict (or json) with the following values
         #income_taxes (Tuple): (Float: Approx amount of taxes paid, Float: Approx. Effective Tax Rate, Float: Net Income)
         #ratios (dict) : Spending items with 1. Float: Annual dollars spent according to CE, 2. Float: Ratio of gross income spent on category
@@ -22,19 +23,28 @@ class COLCalculator():
         ratio_dict = self._get_ratios(gross_income, geocode)
         housing_own, housing_rent = self._get_housing(gross_income, ratio_dict, geocode, mrtg_int)
 
-        return {'taxes': tuple((tax_amount, tax_rate, net_income)), 'geocode' : geocode,
-               'ratios': ratio_dict, 'housing_own' : housing_own, 'housing_rent' : housing_rent }
+        return {
+                "input": {
+                        "gross_income" : gross_income, "city": city, "state" : state, "married" : married, "mortgage_rate": mrtg_int
+                },
+            
+                
+                "result":{
+                    "taxes": {"tax_amount":tax_amount, "tax_rate":tax_rate, "net_income": net_income}, "geocode" : tuple((float(geocode[0]), float(geocode[1]))),
+                    "ratios": ratio_dict, "housing_own": housing_own, "housing_rent" : housing_rent 
+                                    }
+                }
     
     # Tax Calculation  - Federal and State
     def _get_taxes(self, gross_income, city, state, married):
         #returns tax amount, tax %, and net income
         fed_tax, fed_rate = self._calc_fed_tax(gross_income, married)
         state_tax, state_rate = self._calc_state_tax(gross_income, state, married)
-        total_tax = fed_tax + state_tax
-        net_income = gross_income - total_tax
-        effective_tax = total_tax/gross_income
+        total_tax = round(fed_tax + state_tax, 2)
+        net_income = round(gross_income - total_tax, 2)
+        effective_tax = round(total_tax/gross_income, 5)
 
-        return total_tax, effective_tax, net_income
+        return float(total_tax), float(effective_tax), float(net_income)
 
 
     
@@ -87,7 +97,7 @@ class COLCalculator():
             income = gross_income - 24000
         tax_rates = self.data.df_state_tax.loc[self.data.df_state_tax.stateAbbr == state]
         mask = np.logical_and(tax_rates.iloc[:,-2].values<gross_income, tax_rates.iloc[:,-1].values>=gross_income)
-        rate = tax_rates.loc[mask,'incomeTaxRate'].values[0]
+        rate = tax_rates.loc[mask,"incomeTaxRate"].values[0]
         return (income*rate, rate)
     
     def _get_ratios(self, gross_income, geocode):
@@ -97,22 +107,22 @@ class COLCalculator():
         df.dropna(axis=0)
         
         #Make % ratio of gross income spent on living items
-        ratios = df / df['Income before taxes']
+        ratios = df / df["Income before taxes"]
         
-        #Hard-code list of spending items (in order of importance) that should total 
-        items_expenditure = ['Housing', 'Food', 'Transportation', 'Healthcare',
-                             'Apparel and services', 'Entertainment', 'Personal care products and services',
-                             'Reading', 'Education', 'Tobacco products and smoking supplies', 'Miscellaneous',
-                             'Cash contributions', 'Personal insurance and pensions']
-        quality_of_life = ['Apparel and services', 'Entertainment', 'Personal care products and services',
-                             'Reading', 'Education', 'Tobacco products and smoking supplies', 'Miscellaneous',
-                             'Cash contributions', 'Personal insurance and pensions']
+        #Hard-code list of spending items (in order of importance) that should total 100%
+        items_expenditure = ["Housing", "Food", "Transportation", "Healthcare",
+                             "Apparel and services", "Entertainment", "Personal care products and services",
+                             "Reading", "Education", "Tobacco products and smoking supplies", "Miscellaneous",
+                             "Cash contributions", "Personal insurance and pensions"]
+        quality_of_life = ["Apparel and services", "Entertainment", "Personal care products and services",
+                             "Reading", "Education", "Tobacco products and smoking supplies", "Miscellaneous",
+                             "Cash contributions", "Personal insurance and pensions"]
         
         out_dict = {}
         for key in items_expenditure:
             ratio = ratios[key]
             value = ratio*gross_income
-            out_dict[key] = tuple((value, ratio))
+            out_dict[key] = {"dollar_budget": float(round(value,2)), "ratio_of_income": float(round(ratio,3))}
         return out_dict
     
     def _get_housing(self, gross_income, ratio_dict, geocode, mrtg_int):
@@ -130,14 +140,14 @@ class COLCalculator():
         rent_cost_per_sqft = self.data.df_zil_rent.iloc[city_rent_idx, -1]
         
         #Calc Mortgage and housing size
-        own_budget = self._calc_mrtg(ratio_dict['Housing'][0], mrtg_int)
+        own_budget = self._calc_mrtg(ratio_dict["Housing"]["dollar_budget"], mrtg_int)
         own_sqft = own_budget/own_cost_per_sqft
-        housing_own = tuple((int(own_sqft), own_sqft//300))
+        housing_own = {"own_sqft": int(own_sqft), "own_person_capacity": float(own_sqft//300)}
         
         #Calc rent sqft
-        rent_budget = ratio_dict['Housing'][0]/12
+        rent_budget = ratio_dict["Housing"]["dollar_budget"]/12
         rent_sqft = rent_budget/rent_cost_per_sqft
-        housing_rent = tuple((int(rent_sqft), rent_sqft//300))
+        housing_rent = {"rent_sqft": int(rent_sqft), "rent_person_capacity": float(rent_sqft//300)}
         return housing_own, housing_rent
         
     def _calc_mrtg(self, annual_housing_budget, mrtg_int):
@@ -146,12 +156,12 @@ class COLCalculator():
         
         
 
-if __name__ == '__main__':
-    base_ce_path = '../data/bls_ce/msa'
-    base_zil_path = '../data/zillow/city'
-    base_tax_path = '../data/state_tax'
+if __name__ == "__main__":
+    base_ce_path = "data/bls_ce/msa"
+    base_zil_path = "data/zillow/city"
+    base_tax_path = "data/state_tax"
 
     calculator = COLCalculator(base_zil_path,base_ce_path,base_tax_path)
 
-    calculator.calculate(100000, 'San Francisco', 'CA')
+    calculator.calculate(100000, "San Francisco", "CA")
 

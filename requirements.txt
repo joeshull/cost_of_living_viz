@@ -1,0 +1,6 @@
+Flask==1.0.2
+geocoder==1.38.1
+numpy==1.15.4
+pandas==0.23.4
+requests==2.21.0
+xlrd==1.1.0
